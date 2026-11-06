@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Northstar Identity - Serverless Express application
+Parameters:
+  MongoDbUri:
+    Type: String
+    NoEcho: true
+    Description: MongoDB Atlas connection URI
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    Description: JWT signing secret
+  SessionSecret:
+    Type: String
+    NoEcho: true
+    Description: Express session secret
+  GoogleClientId:
+    Type: String
+    NoEcho: true
+    Description: Google OAuth client ID
+  GoogleClientSecret:
+    Type: String
+    NoEcho: true
+    Description: Google OAuth client secret
+  GmailTokenEncryptionKey:
+    Type: String
+    NoEcho: true
+    Description: Gmail refresh token encryption key
+  FrontendUrl:
+    Type: String
+    Default: http://localhost:5173
+    Description: Frontend origin; update after CloudFront deployment
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 30
+    MemorySize: 512
+    Environment:
+      Variables:
+        NODE_ENV: production
+        MONGODB_URI:
+          Ref: MongoDbUri
+        JWT_SECRET:
+          Ref: JwtSecret
+        SESSION_SECRET:
+          Ref: SessionSecret
+        GOOGLE_CLIENT_ID:
+          Ref: GoogleClientId
+        GOOGLE_CLIENT_SECRET:
+          Ref: GoogleClientSecret
+        GMAIL_TOKEN_ENCRYPTION_KEY:
+          Ref: GmailTokenEncryptionKey
+        FRONTEND_URL:
+          Ref: FrontendUrl
+        COOKIE_SECURE: 'true'
+        BACKEND_URL:
+          Fn::Sub: https://${NorthstarHttpApi}.execute-api.${AWS::Region}.amazonaws.com
+Resources:
+  NorthstarHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+  NorthstarBackendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: northstar-identity-backend
+      CodeUri: NorthstarBackendFunction
+      Handler: src/lambda.handler
+      Description: Express backend for Northstar Identity
+      Events:
+        RootApi:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: NorthstarHttpApi
+            Path: /
+            Method: ANY
+        ProxyApi:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: NorthstarHttpApi
+            Path: /{proxy+}
+            Method: ANY
+    Metadata:
+      SamResourceId: NorthstarBackendFunction
+Outputs:
+  BackendApiUrl:
+    Description: Northstar Identity backend API URL
+    Value:
+      Fn::Sub: https://${NorthstarHttpApi}.execute-api.${AWS::Region}.amazonaws.com
+  LambdaFunctionName:
+    Description: Backend Lambda function
+    Value:
+      Ref: NorthstarBackendFunction
