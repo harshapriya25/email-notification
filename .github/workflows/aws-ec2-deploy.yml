@@ -1,0 +1,112 @@
+
+name: Build and Deploy to AWS EC2
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Validate and build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify Gmail API dependency
+        run: npm ls googleapis --prefix backend
+
+      - name: Check Gmail integration files
+        run: |
+          test -f backend/src/routes/gmail.js
+          test -f backend/src/utils/encryption.js
+
+      - name: Check backend JavaScript syntax
+        run: |
+          find backend/src -name '*.js' -print0 | xargs -0 -n1 node --check
+
+      - name: Validate Docker Compose configuration
+        run: docker compose config -q
+
+      - name: Check Git whitespace errors
+        run: git diff --check
+
+  deploy:
+    name: Deploy to EC2
+    needs: build
+
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/ec2_key
+          chmod 600 ~/.ssh/ec2_key
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+
+      - name: Copy application to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH }}
+        run: |
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" "mkdir -p '$EC2_DEPLOY_PATH'"
+
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude 'backend/.env' \
+            --exclude 'frontend/.env' \
+            -e "ssh -i ~/.ssh/ec2_key" \
+            ./ "$EC2_USER@$EC2_HOST:$EC2_DEPLOY_PATH/"
+
+      - name: Build and restart application on EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH }}
+        run: |
+          ssh -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
+            "cd '$EC2_DEPLOY_PATH' && docker compose up -d --build --remove-orphans && docker image prune -f"
