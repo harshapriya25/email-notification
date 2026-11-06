@@ -118,14 +118,29 @@ jobs:
       - name: SAM Build
         run: sam build --template-file template.yaml
 
+      - 
       - name: SAM Deploy
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          GMAIL_TOKEN_ENCRYPTION_KEY: ${{ secrets.GMAIL_TOKEN_ENCRYPTION_KEY }}
         run: |
           sam deploy \
             --stack-name northstar-prod \
             --resolve-s3 \
             --capabilities CAPABILITY_IAM \
             --no-confirm-changeset \
-            --no-fail-on-empty-changeset
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              "JwtSecret=$JWT_SECRET" \
+              "MongoDbUri=$MONGODB_URI" \
+              "GoogleClientId=$GOOGLE_CLIENT_ID" \
+              "GoogleClientSecret=$GOOGLE_CLIENT_SECRET" \
+              "SessionSecret=$SESSION_SECRET" \
+              "GmailTokenEncryptionKey=$GMAIL_TOKEN_ENCRYPTION_KEY"
 
 
   # JOB 3: DEPLOY FRONTEND TO S3 AND CLOUDFRONT
