@@ -118,7 +118,6 @@ jobs:
       - name: SAM Build
         run: sam build --template-file template.yaml
 
-      - 
       - name: SAM Deploy
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
