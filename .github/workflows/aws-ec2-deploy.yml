@@ -80,6 +80,7 @@ jobs:
       - name: Check Git whitespace
         run: git diff --check
 
+
   # JOB 2: DEPLOY BACKEND TO AWS LAMBDA
   deploy-backend:
     name: Deploy Backend
@@ -91,12 +92,25 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Validate AWS Region
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          if [ -z "$AWS_REGION" ]; then
+            echo "AWS_REGION secret is missing or empty"
+            exit 1
+          fi
+          echo "AWS Region is configured"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ vars.AWS_REGION }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
 
       - name: Setup SAM
         uses: aws-actions/setup-sam@v2
@@ -113,10 +127,12 @@ jobs:
             --no-confirm-changeset \
             --no-fail-on-empty-changeset
 
+
   # JOB 3: DEPLOY FRONTEND TO S3 AND CLOUDFRONT
   deploy-frontend:
     name: Deploy Frontend
     needs: deploy-backend
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
@@ -128,7 +144,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ vars.AWS_REGION }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -146,6 +162,15 @@ jobs:
         env:
           VITE_API_URL: ${{ vars.VITE_API_URL }}
         run: npm run build
+
+      - name: Validate deployment configuration
+        env:
+          S3_BUCKET: ${{ vars.S3_BUCKET }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          test -n "$S3_BUCKET" || (echo "S3_BUCKET is missing" && exit 1)
+          test -n "$CLOUDFRONT_DISTRIBUTION_ID" || (echo "CLOUDFRONT_DISTRIBUTION_ID is missing" && exit 1)
+          test -d frontend/dist || (echo "Frontend build directory missing" && exit 1)
 
       - name: Upload frontend to S3
         run: |
